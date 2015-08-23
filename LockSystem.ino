@@ -1,5 +1,8 @@
 #include <Keypad.h>
 #include <Servo.h>
+#include <EEPROM.h>
+#include <Arduino.h>  // for type definitions
+#include "EEPROMData.h"
 
 // Variables Definition
 #define BUZZER_PIN 9
@@ -45,7 +48,8 @@ void buzz(int delayTimeInms);
 
 
 // Start
-void setup(){
+void setup()
+{
   Serial.begin(9600);
   myServo.attach(SERVO_PIN); // servo on digital pin 10
   pinMode(BUZZER_PIN, OUTPUT);
@@ -64,7 +68,7 @@ void setup(){
     delay(5);                       // waits 15ms for the servo to reach the position 
   }
   //////////////////////////////////////
- 
+  
   printMessage("Please Choose A Password");
 }
   
@@ -98,6 +102,7 @@ void loop()
         if(key == SPECIAL_CHAR)
         {
           printMessage("Saving Password...");
+          // TODO: save password to EEPROM.
           password = tempPassword;
           tempPassword = "";
           state = WAITING_FOR_INPUT;
@@ -112,6 +117,7 @@ void loop()
         
         if(key == APPLY_PASSWORD)
         {
+          // TODO: read password to EEPROM.
           if(password == tempPassword)
           {
             correctPassword();
