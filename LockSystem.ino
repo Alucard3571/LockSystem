@@ -43,6 +43,7 @@ void setup(){
   pinMode(BUZZER_PIN, OUTPUT);
   state = STATE_CONFIG_PASS;
   passwordLength = password.length();
+  printMessage("Please Choose A Password");
 }
   
 void loop()
