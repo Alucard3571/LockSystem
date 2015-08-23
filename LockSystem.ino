@@ -1,7 +1,9 @@
 #include <Keypad.h>
+#include <Servo.h>
 
 // Variables Definition
 #define BUZZER_PIN 9
+#define SERVO_PIN 10
 #define STATE_CONFIG_PASS 1
 #define WAITING_FOR_INPUT 2
 
@@ -22,27 +24,47 @@ char keys[ROWS][COLS] = {
   {'7','8','9'},
   {'*','0','#'}
 };
+
 byte rowPins[ROWS] = {5, 4, 3, 2}; //connect to the row pinouts of the keypad
 byte colPins[COLS] = {8, 7, 6}; //connect to the column pinouts of the keypad
+Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
+Servo myServo; // Define our Servo
+
 String password = "1234";
 String tempPassword = "";
 int passwordLength;
 int state;
-Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
 
 // Function Declaration
 void printMessage(String message);
 void correctPassword();
 void wrongPassword();
+void openDoor();
+void closeDoor();
 void buzz(int delayTimeInms);
 
 
 // Start
 void setup(){
   Serial.begin(9600);
+  myServo.attach(SERVO_PIN); // servo on digital pin 10
   pinMode(BUZZER_PIN, OUTPUT);
   state = STATE_CONFIG_PASS;
   passwordLength = password.length();
+  
+  // TODO: remove this once we figure out what is causing the servo to act crazy at first.
+  for(int pos = 0; pos <= 90; pos += 1) // goes from 0 degrees to 180 degrees 
+  {                                  // in steps of 1 degree 
+    myServo.write(pos);              // tell servo to go to position in variable 'pos' 
+    delay(5);                       // waits 15ms for the servo to reach the position 
+  }
+  for(int pos = 90; pos>=0; pos-=1)     // goes from 180 degrees to 0 degrees 
+  {                                
+    myServo.write(pos);              // tell servo to go to position in variable 'pos' 
+    delay(5);                       // waits 15ms for the servo to reach the position 
+  }
+  //////////////////////////////////////
+ 
   printMessage("Please Choose A Password");
 }
   
@@ -59,7 +81,7 @@ void loop()
      switch(state)
      {
        case STATE_CONFIG_PASS:
-        if(key != SPECIAL_CHAR)
+        if(key != SPECIAL_CHAR && key != APPLY_PASSWORD)
         {
           tempPassword += key;
         }
@@ -136,6 +158,32 @@ void printMessage(String message)
 void correctPassword()
 {
   printMessage("Password Matched");
+  printMessage("Press # to unlock and * to lock");
+  bool commandReceived = false;
+  while(!commandReceived)
+  {
+     char key = keypad.getKey();    
+     if (key != NO_KEY)
+     {
+        if(key == '#')
+        {
+          printMessage("Openning Lock");
+          openDoor();
+          commandReceived = true;
+        }
+        else if(key == '*')
+        {
+          printMessage("Closing Lock");
+          closeDoor();
+          commandReceived = true;
+        }
+        else
+        {
+          printMessage("Invalid Command");
+          printMessage("Press # to unlock and * to lock");
+        }
+     }
+  }
 }
 
 void wrongPassword()
@@ -144,6 +192,25 @@ void wrongPassword()
   printMessage("Try Again");
   buzz(2000);
 }
+
+void openDoor()
+{
+  for(int pos = 0; pos <= 90; pos += 1) // goes from 0 degrees to 180 degrees 
+  {                                  // in steps of 1 degree 
+    myServo.write(pos);              // tell servo to go to position in variable 'pos' 
+    delay(5);                       // waits 15ms for the servo to reach the position 
+  }
+}
+
+void closeDoor()
+{
+  for(int pos = 90; pos>=0; pos-=1)     // goes from 180 degrees to 0 degrees 
+  {                                
+    myServo.write(pos);              // tell servo to go to position in variable 'pos' 
+    delay(5);                       // waits 15ms for the servo to reach the position 
+  }
+}
+
 void buzz(int delayTimeInms)
 {
   digitalWrite(BUZZER_PIN, HIGH);
