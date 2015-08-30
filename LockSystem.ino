@@ -10,6 +10,8 @@
 #define STATE_CONFIG_PASS 1
 #define WAITING_FOR_INPUT 2
 
+#define EEPROM_START_ADDRESS 0x00
+
 #define DEBUG
 // TODO: define once we have an LCD
 //#define LCD_ENABLED
@@ -32,6 +34,7 @@ byte rowPins[ROWS] = {5, 4, 3, 2}; //connect to the row pinouts of the keypad
 byte colPins[COLS] = {8, 7, 6}; //connect to the column pinouts of the keypad
 Keypad keypad = Keypad( makeKeymap(keys), rowPins, colPins, ROWS, COLS );
 Servo myServo; // Define our Servo
+EEPROMData eeprom(EEPROM_START_ADDRESS);
 
 String password = "1234";
 String tempPassword = "";
