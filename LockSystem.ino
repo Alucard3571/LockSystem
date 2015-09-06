@@ -8,6 +8,7 @@
 // Variables Definition
 #define BUZZER_PIN 9
 #define SERVO_PIN 10
+#define DOOR_SENSOR_ANALOG_PIN A0
 
 #define STATE_CONFIG_PASS 1
 #define WAITING_FOR_INPUT 2
@@ -23,6 +24,7 @@
 
 #define SPECIAL_CHAR '#'
 #define APPLY_PASSWORD '*'
+#define MONITOR_DOOR_KEY '1'
 
 #define ROWS 4
 #define COLS 3
@@ -40,9 +42,12 @@ String tempPassword = "";
 String emptyPassword = "NO DATA";
 String maxPasswordLength(PASSWORD_ALLOWED_LENGTH);
 int state;
+bool doorOpenedAlarm = false;
+String Status;
 
 // Function Declaration
 int getState();
+void setState(int state);
 void printMessage(String message);
 void correctPassword();
 void wrongPassword();
@@ -51,6 +56,7 @@ void closeDoor();
 void buzz(int delayTimeInms);
 void writeEEPROMData(String data);
 void readEEPROMData(String& data);
+void setStatus(int state);
 
 
 // Start
@@ -61,8 +67,8 @@ void setup()
   Wire.begin();
   keypad.init();
   pinMode(BUZZER_PIN, OUTPUT);
-  writeEEPROMData("NO DATA");
-  state = getState();
+  digitalWrite(DOOR_SENSOR_ANALOG_PIN, LOW);
+  //writeEEPROMData("NO DATA");
   // TODO: remove this once we figure out what is causing the servo to act crazy at first.
   for(int pos = 0; pos <= 90; pos += 1) // goes from 0 degrees to 180 degrees 
   {                                  // in steps of 1 degree 
@@ -77,10 +83,12 @@ void setup()
   //////////////////////////////////////
 
   printMessage("Done With Setup");
+  state = getState();
 }
   
 void loop()
 {
+   
    // read pressed key
    char key = keypad.getkey();
 
@@ -111,7 +119,7 @@ void loop()
           // save password to EEPROM.
           writeEEPROMData(tempPassword);
           tempPassword = "";
-          state = WAITING_FOR_INPUT;
+          setState(WAITING_FOR_INPUT);
           printMessage("Password Saved.");
         }
         break;
@@ -134,14 +142,14 @@ void loop()
           else
           {
             wrongPassword();
-            state = WAITING_FOR_INPUT;
+            setState(WAITING_FOR_INPUT);
             tempPassword = "";
           }
         }
         else if(tempPassword.length() > PASSWORD_ALLOWED_LENGTH)
         {
           wrongPassword();
-          state = WAITING_FOR_INPUT;
+          setState(WAITING_FOR_INPUT);
           tempPassword = "";
         }
 #ifdef DEBUG
@@ -177,6 +185,23 @@ int getState()
   }
 }
 
+void setState(int state)
+{
+  state = state;
+  setStatus(state);
+}
+
+void setStatus(int state)
+{
+  /*
+  switch(state)
+  {
+    case STATE_CONFIG_PASS:
+    case WAITING_FOR_INPUT:
+  }
+  */
+}
+
 void printMessage(String message)
 {
 #ifdef LCD_ENABLED
@@ -190,8 +215,10 @@ void printMessage(String message)
 void correctPassword()
 {
   printMessage("Password Matched");
-  printMessage("Press # to unlock and * to lock");
+  printMessage("Press # to unlock, * to lock, or 1 to unlock and monitor");
   bool commandReceived = false;
+  disablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
+  digitalWrite(BUZZER_PIN, LOW);
   while(!commandReceived)
   {
      char key = keypad.getkey();    
@@ -207,6 +234,14 @@ void correctPassword()
         {
           printMessage("Closing Lock");
           closeDoor();
+          enablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
+          commandReceived = true;
+        }
+        else if(key == MONITOR_DOOR_KEY)
+        {
+          printMessage("Openning Lock and Monitoring the door");
+          openDoor();
+          enablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
           commandReceived = true;
         }
         else
@@ -245,6 +280,9 @@ void closeDoor()
 
 void buzz(int delayTimeInms)
 {
+  // buzzer is already in use by the alarm.
+  if(doorOpenedAlarm) return;
+
   digitalWrite(BUZZER_PIN, HIGH);
   delay(delayTimeInms);
   digitalWrite(BUZZER_PIN, LOW);
@@ -263,3 +301,42 @@ void readEEPROMData(String& data)
     printMessage("READ DATA: " + data);
   }
 }
+
+void monitorDoorStatus()
+{
+   // TODO: use interrupts.
+   delay(50);
+   
+}
+
+void enablePinInterrupt(byte pin)
+{
+    *digitalPinToPCMSK(pin) |= bit (digitalPinToPCMSKbit(pin));  // enable pin
+    PCIFR  |= bit (digitalPinToPCICRbit(pin)); // clear any outstanding interrupt
+    PCICR  |= bit (digitalPinToPCICRbit(pin)); // enable interrupt for the group
+}
+
+void disablePinInterrupt(byte pin)
+{
+    *digitalPinToPCMSK(pin) &= ~bit (digitalPinToPCMSKbit(pin));  // disable pin
+    PCIFR  |= bit (digitalPinToPCICRbit(pin)); // clear any outstanding interrupt
+    PCICR  |= bit (digitalPinToPCICRbit(pin)); // enable interrupt for the group
+}
+
+ISR (PCINT1_vect) // handle pin change interrupt for A0 to A5 here
+{
+   int value = analogRead(DOOR_SENSOR_ANALOG_PIN);
+   //Serial.println(value);
+   // TODO: figure out from sensor what the values are.
+   if(value == 1)
+   {
+     // door is closed.
+   }
+   else
+   {
+     // door opened.
+     // buzz until password is entered.
+     digitalWrite(BUZZER_PIN, HIGH);
+     doorOpenedAlarm = true;
+   }
+}  
