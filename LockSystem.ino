@@ -18,13 +18,21 @@
 #define DEBUG
 // TODO: define once we have an LCD
 //#define LCD_ENABLED
+#define NEW_LINE '\n'
 
 #define PASSWORD_ALLOWED_LENGTH 9
 #define PASSWORD_EMPTY_LENGTH "         "
 
 #define SPECIAL_CHAR '#'
 #define APPLY_PASSWORD '*'
-#define MONITOR_DOOR_KEY '1'
+#define LOCK_DOOR APPLY_PASSWORD
+#define UNLOCK_DOOR SPECIAL_CHAR
+#define OPEN_AND_MONITOR_DOOR '1'
+
+#define UNKNOWN_STATE "STATUS: Unknown State"
+#define DOOR_LOCKED_STATE "STATUS: LOCKED"
+#define DOOR_UNLOCKED_STATE "STATUS: UNLOCKED"
+#define DOOR_UNLOCKED_WITH_MONITORING_STATE "STATUS: UNLOCKED & MNTR"
 
 #define ROWS 4
 #define COLS 3
@@ -41,13 +49,11 @@ EEPROMData eeprom(EEPROM_START_ADDRESS);
 String tempPassword = "";
 String emptyPassword = "NO DATA";
 String maxPasswordLength(PASSWORD_ALLOWED_LENGTH);
-int state;
+unsigned int state;
 bool doorOpenedAlarm = false;
 String Status;
 
 // Function Declaration
-int getState();
-void setState(int state);
 void printMessage(String message);
 void correctPassword();
 void wrongPassword();
@@ -56,7 +62,9 @@ void closeDoor();
 void buzz(int delayTimeInms);
 void writeEEPROMData(String data);
 void readEEPROMData(String& data);
-void setStatus(int state);
+unsigned int getState();
+void setState(unsigned int stat);
+void setStatus(String stat);
 
 
 // Start
@@ -66,54 +74,43 @@ void setup()
   myServo.attach(SERVO_PIN); // servo on digital pin 10
   Wire.begin();
   keypad.init();
+  digitalWrite(BUZZER_PIN, LOW);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(DOOR_SENSOR_ANALOG_PIN, LOW);
-  //writeEEPROMData("NO DATA");
-  // TODO: remove this once we figure out what is causing the servo to act crazy at first.
-  for(int pos = 0; pos <= 90; pos += 1) // goes from 0 degrees to 180 degrees 
-  {                                  // in steps of 1 degree 
-    myServo.write(pos);              // tell servo to go to position in variable 'pos' 
-    delay(5);                       // waits 15ms for the servo to reach the position 
-  }
-  for(int pos = 90; pos>=0; pos-=1)     // goes from 180 degrees to 0 degrees 
-  {                                
-    myServo.write(pos);              // tell servo to go to position in variable 'pos' 
-    delay(5);                       // waits 15ms for the servo to reach the position 
-  }
-  //////////////////////////////////////
-
+  // Enable before sending it to customer.
+  writeEEPROMData("NO DATA");
+  setStatus(UNKNOWN_STATE);
   printMessage("Done With Setup");
-  state = getState();
+  setState(getState());
 }
-  
+
 void loop()
 {
-   
-   // read pressed key
-   char key = keypad.getkey();
 
-   if (key != NO_KEY_VALUE)
-   {
-     Serial.println(key);
-     buzz(50);
-     // state machine
-     switch(state)
-     {
-       case STATE_CONFIG_PASS:
-        if(key != SPECIAL_CHAR && key != APPLY_PASSWORD)
+  // read pressed key
+  char key = keypad.getkey();
+
+  if (key != NO_KEY_VALUE)
+  {
+    Serial.println(key);
+    buzz(50);
+    // state machine
+    switch (state)
+    {
+      case STATE_CONFIG_PASS:
+        if (key != SPECIAL_CHAR && key != APPLY_PASSWORD)
         {
           tempPassword += key;
         }
         // TODO: handle '*' and '#' properly.
-        
-        if(tempPassword.length() > PASSWORD_ALLOWED_LENGTH && key != SPECIAL_CHAR)
+        if (tempPassword.length() > PASSWORD_ALLOWED_LENGTH)
         {
           String message = "Password Max Size Is: " + maxPasswordLength;
           printMessage(message);
           printMessage("Try Again");
           tempPassword = "";
         }
-        if(key == SPECIAL_CHAR)
+        if (key == SPECIAL_CHAR)
         {
           printMessage("Saving Password...");
           // save password to EEPROM.
@@ -123,18 +120,18 @@ void loop()
           printMessage("Password Saved.");
         }
         break;
-       case WAITING_FOR_INPUT:
-        if(key != SPECIAL_CHAR && key != APPLY_PASSWORD)
+      case WAITING_FOR_INPUT:
+        if (key != SPECIAL_CHAR && key != APPLY_PASSWORD)
         {
           tempPassword += key;
         }
-        
-        if(key == APPLY_PASSWORD)
+
+        if (key == APPLY_PASSWORD)
         {
           // read password from EEPROM.
           String password(PASSWORD_EMPTY_LENGTH);
           readEEPROMData(password);
-          if(password == tempPassword)
+          if (password == tempPassword)
           {
             correctPassword();
             tempPassword = "";
@@ -146,14 +143,14 @@ void loop()
             tempPassword = "";
           }
         }
-        else if(tempPassword.length() > PASSWORD_ALLOWED_LENGTH)
+        else if (tempPassword.length() > PASSWORD_ALLOWED_LENGTH)
         {
           wrongPassword();
           setState(WAITING_FOR_INPUT);
           tempPassword = "";
         }
 #ifdef DEBUG
-        if(key == SPECIAL_CHAR)
+        if (key == SPECIAL_CHAR)
         {
           printMessage("Printing Password...");
           String password(PASSWORD_EMPTY_LENGTH);
@@ -162,18 +159,19 @@ void loop()
         }
 #endif
         break;
-       default:
-          
+      default:
+           printMessage("This should not happen!!!");
+           Serial.print(state);
         break;
-     }
+    }
   }
 }
 
-int getState()
+unsigned int getState()
 {
   String temp(PASSWORD_EMPTY_LENGTH);
   readEEPROMData(temp);
-  if(temp.equals(emptyPassword))
+  if (temp.equals(emptyPassword))
   {
     printMessage("Choose A Password");
     return STATE_CONFIG_PASS;
@@ -185,29 +183,36 @@ int getState()
   }
 }
 
-void setState(int state)
+void setState(unsigned int stat)
 {
-  state = state;
-  setStatus(state);
-}
-
-void setStatus(int state)
-{
-  /*
-  switch(state)
+  switch (stat)
   {
     case STATE_CONFIG_PASS:
+      printMessage("STATE_CONFIG_PASS");
+      state = STATE_CONFIG_PASS;
+      break;
     case WAITING_FOR_INPUT:
+      printMessage("WAITING_FOR_INPUT");
+      state = WAITING_FOR_INPUT;
+      break;
+    default:
+      printMessage("This should not happen!");
+      break;
   }
-  */
+}
+
+void setStatus(String stat)
+{
+  // TODO: make this its own line in the lCD.
+  printMessage(stat);
 }
 
 void printMessage(String message)
 {
 #ifdef LCD_ENABLED
- Serial.println("IS THE LCD ON?!!!");
+  Serial.println("IS THE LCD ON?!!!");
 #else
- Serial.println(message);
+  Serial.println(message);
 #endif
 
 }
@@ -219,37 +224,40 @@ void correctPassword()
   bool commandReceived = false;
   disablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
   digitalWrite(BUZZER_PIN, LOW);
-  while(!commandReceived)
+  while (!commandReceived)
   {
-     char key = keypad.getkey();    
-     if (key != NO_KEY_VALUE)
-     {
-        if(key == '#')
-        {
-          printMessage("Openning Lock");
-          openDoor();
-          commandReceived = true;
-        }
-        else if(key == '*')
-        {
-          printMessage("Closing Lock");
-          closeDoor();
-          enablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
-          commandReceived = true;
-        }
-        else if(key == MONITOR_DOOR_KEY)
-        {
-          printMessage("Openning Lock and Monitoring the door");
-          openDoor();
-          enablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
-          commandReceived = true;
-        }
-        else
-        {
-          printMessage("Invalid Command");
-          printMessage("Press # to unlock and * to lock");
-        }
-     }
+    char key = keypad.getkey();
+    if (key != NO_KEY_VALUE)
+    {
+      if (key == UNLOCK_DOOR)
+      {
+        printMessage("Openning Lock");
+        openDoor();
+        commandReceived = true;
+        setStatus(DOOR_UNLOCKED_STATE);
+      }
+      else if (key == LOCK_DOOR)
+      {
+        printMessage("Closing Lock");
+        closeDoor();
+        enablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
+        commandReceived = true;
+        setStatus(DOOR_LOCKED_STATE);
+      }
+      else if (key == OPEN_AND_MONITOR_DOOR)
+      {
+        printMessage("Openning Lock and Monitoring the door");
+        openDoor();
+        enablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
+        commandReceived = true;
+        setStatus(DOOR_UNLOCKED_WITH_MONITORING_STATE);
+      }
+      else
+      {
+        printMessage("Invalid Command");
+        printMessage("Press # to unlock and * to lock");
+      }
+    }
   }
 }
 
@@ -262,26 +270,22 @@ void wrongPassword()
 
 void openDoor()
 {
-  for(int pos = 0; pos <= 90; pos += 1) // goes from 0 degrees to 180 degrees 
-  {                                  // in steps of 1 degree 
-    myServo.write(pos);              // tell servo to go to position in variable 'pos' 
-    delay(5);                       // waits 15ms for the servo to reach the position 
-  }
+  myServo.write(0); // clock wise.
+  delay(600);
+  myServo.write(94); // stop rotation.
 }
 
 void closeDoor()
 {
-  for(int pos = 90; pos>=0; pos-=1)     // goes from 180 degrees to 0 degrees 
-  {                                
-    myServo.write(pos);              // tell servo to go to position in variable 'pos' 
-    delay(5);                       // waits 15ms for the servo to reach the position 
-  }
+  myServo.write(255); // anti clock wise.
+  delay(600);
+  myServo.write(94);  // stop rotation.
 }
 
 void buzz(int delayTimeInms)
 {
   // buzzer is already in use by the alarm.
-  if(doorOpenedAlarm) return;
+  if (doorOpenedAlarm) return;
 
   digitalWrite(BUZZER_PIN, HIGH);
   delay(delayTimeInms);
@@ -295,7 +299,7 @@ void writeEEPROMData(String data)
 
 void readEEPROMData(String& data)
 {
-  if(!eeprom.readData(data))
+  if (!eeprom.readData(data))
   {
     printMessage("ERROR READING EEPROM DATA!!!");
     printMessage("READ DATA: " + data);
@@ -304,39 +308,42 @@ void readEEPROMData(String& data)
 
 void monitorDoorStatus()
 {
-   // TODO: use interrupts.
-   delay(50);
-   
+  // TODO: use interrupts.
+  delay(50);
+
 }
 
 void enablePinInterrupt(byte pin)
 {
-    *digitalPinToPCMSK(pin) |= bit (digitalPinToPCMSKbit(pin));  // enable pin
-    PCIFR  |= bit (digitalPinToPCICRbit(pin)); // clear any outstanding interrupt
-    PCICR  |= bit (digitalPinToPCICRbit(pin)); // enable interrupt for the group
+  *digitalPinToPCMSK(pin) |= bit (digitalPinToPCMSKbit(pin));  // enable pin
+  PCIFR  |= bit (digitalPinToPCICRbit(pin)); // clear any outstanding interrupt
+  PCICR  |= bit (digitalPinToPCICRbit(pin)); // enable interrupt for the group
 }
 
 void disablePinInterrupt(byte pin)
 {
-    *digitalPinToPCMSK(pin) &= ~bit (digitalPinToPCMSKbit(pin));  // disable pin
-    PCIFR  |= bit (digitalPinToPCICRbit(pin)); // clear any outstanding interrupt
-    PCICR  |= bit (digitalPinToPCICRbit(pin)); // enable interrupt for the group
+  *digitalPinToPCMSK(pin) &= ~bit (digitalPinToPCMSKbit(pin));  // disable pin
+  PCIFR  |= bit (digitalPinToPCICRbit(pin)); // clear any outstanding interrupt
+  PCICR  |= bit (digitalPinToPCICRbit(pin)); // enable interrupt for the group
 }
 
 ISR (PCINT1_vect) // handle pin change interrupt for A0 to A5 here
 {
-   int value = analogRead(DOOR_SENSOR_ANALOG_PIN);
-   //Serial.println(value);
-   // TODO: figure out from sensor what the values are.
-   if(value == 1)
-   {
-     // door is closed.
-   }
-   else
-   {
-     // door opened.
-     // buzz until password is entered.
-     digitalWrite(BUZZER_PIN, HIGH);
-     doorOpenedAlarm = true;
-   }
-}  
+  int value = digitalRead(DOOR_SENSOR_ANALOG_PIN);
+  Serial.print(value);
+  Serial.print(NEW_LINE);
+  // 0: closed - 1: open.
+  if (value == 0)
+  {
+    // door is closed.
+    // do nothing.
+  }
+  else
+  {
+    // door opened.
+    Serial.print("DOOR WAS OPENED!!! SOUND THE ALARM");
+    // buzz until password is entered.
+    digitalWrite(BUZZER_PIN, HIGH);
+    doorOpenedAlarm = true;
+  }
+}
