@@ -2,6 +2,12 @@
 #include <Wire.h>
 #include <EEPROM.h>
 #include <Arduino.h>  // for type definitions
+// Get the LCD I2C Library here:
+// https://bitbucket.org/fmalpartida/new-liquidcrystal/downloads
+// Move any other LCD libraries to another folder or delete them
+// See Library "Docs" folder for possible commands etc.
+#include <LiquidCrystal_I2C.h>
+#include "SimpleTimer.h"
 #include "EEPROMData.h"
 #include "i2ckeypadreader.h"
 
@@ -16,23 +22,32 @@
 #define EEPROM_START_ADDRESS 0x00
 
 #define DEBUG
-// TODO: define once we have an LCD
-//#define LCD_ENABLED
+
+#define LCD_NUMBER_OF_CHARACTERS 20
+#define LCD_NUMBER_OF_LINES 4
+
+#define PASSCODE_ROW 3
+#define MESSAGES_ROW 2
+#define INSTRUCTIONS_ROW 1
+#define STATUS_ROW 0
+
+#define DELAY_BETWEEN_MESSAGES 2000 // 2 seconds
 #define NEW_LINE '\n'
 
 #define PASSWORD_ALLOWED_LENGTH 9
 #define PASSWORD_EMPTY_LENGTH "         "
 
 #define SPECIAL_CHAR '#'
-#define APPLY_PASSWORD '*'
-#define LOCK_DOOR APPLY_PASSWORD
+#define APPLY_PASSWORD '#'
+#define DEBUG_CHAR '*'
+#define LOCK_DOOR '*'
 #define UNLOCK_DOOR SPECIAL_CHAR
 #define OPEN_AND_MONITOR_DOOR '1'
 
-#define UNKNOWN_STATE "STATUS: Unknown State"
-#define DOOR_LOCKED_STATE "STATUS: LOCKED"
-#define DOOR_UNLOCKED_STATE "STATUS: UNLOCKED"
-#define DOOR_UNLOCKED_WITH_MONITORING_STATE "STATUS: UNLOCKED & MNTR"
+#define UNKNOWN_STATE                       "STATUS: UNKNOWN"
+#define DOOR_LOCKED_STATE                   "STATUS: LOCKED"
+#define DOOR_UNLOCKED_STATE                 "STATUS: UNLOCKED"
+#define DOOR_UNLOCKED_WITH_MONITORING_STATE "STATUS: UNLOCKED&MNT"
 
 #define ROWS 4
 #define COLS 3
@@ -43,14 +58,23 @@
 
 i2ckeypad keypad = i2ckeypad(PCF8574_ADDR, ROWS, COLS);
 
+// set the LCD address to 0x27 for a 20 chars 4 line display
+// Set the pins on the I2C chip used for LCD connections:
+//                    addr, en,rw,rs,d4,d5,d6,d7,bl,blpol
+LiquidCrystal_I2C lcd(0x27, 2, 1, 0, 4, 5, 6, 7, 3, POSITIVE);  // Set the LCD I2C address
+
 Servo myServo; // Define our Servo
 EEPROMData eeprom(EEPROM_START_ADDRESS);
+SimpleTimer timer;
 
 String tempPassword = "";
 String emptyPassword = "NO DATA";
 String maxPasswordLength(PASSWORD_ALLOWED_LENGTH);
 unsigned int state;
+int timer_id;
 bool doorOpenedAlarm = false;
+bool isSpecialCharacter = false;
+bool lcdBacklistOff = false;
 String Status;
 
 // Function Declaration
@@ -65,7 +89,10 @@ void readEEPROMData(String& data);
 unsigned int getState();
 void setState(unsigned int stat);
 void setStatus(String stat);
-
+void printCode(unsigned int location, char key, bool show);
+void clearScreen(unsigned int row);
+void lcdPrintMessage(String message, unsigned int row, bool clearAfterDelay, bool delayMessage);
+void turnLCDBacklightOff();
 
 // Start
 void setup()
@@ -74,56 +101,103 @@ void setup()
   myServo.attach(SERVO_PIN); // servo on digital pin 10
   Wire.begin();
   keypad.init();
+  lcd.begin(LCD_NUMBER_OF_CHARACTERS, LCD_NUMBER_OF_LINES); // initialize the lcd for 20 chars 4 lines
+  lcd.backlight(); // finish with backlight on
   digitalWrite(BUZZER_PIN, LOW);
   pinMode(BUZZER_PIN, OUTPUT);
   digitalWrite(DOOR_SENSOR_ANALOG_PIN, LOW);
   // Enable before sending it to customer.
-  writeEEPROMData("NO DATA");
+  //writeEEPROMData("NO DATA");
   setStatus(UNKNOWN_STATE);
   printMessage("Done With Setup");
   setState(getState());
+  timer_id = timer.setInterval(60000, turnLCDBacklightOff);
 }
 
 void loop()
 {
+  timer.run();
 
   // read pressed key
   char key = keypad.getkey();
 
   if (key != NO_KEY_VALUE)
   {
+    if (lcdBacklistOff)
+    {
+      lcd.backlight();
+      lcdBacklistOff = false;
+    }
+
+    timer.restartTimer(timer_id);
+
     Serial.println(key);
     buzz(50);
+    isSpecialCharacter = (key == SPECIAL_CHAR || key == APPLY_PASSWORD);
     // state machine
     switch (state)
     {
       case STATE_CONFIG_PASS:
-        if (key != SPECIAL_CHAR && key != APPLY_PASSWORD)
+        if (!isSpecialCharacter)
         {
           tempPassword += key;
         }
-        // TODO: handle '*' and '#' properly.
-        if (tempPassword.length() > PASSWORD_ALLOWED_LENGTH)
+        if (tempPassword.length() <= PASSWORD_ALLOWED_LENGTH)
         {
-          String message = "Password Max Size Is: " + maxPasswordLength;
+          if (!isSpecialCharacter)
+          {
+            printCode(tempPassword.length(), key, true);
+          }
+        }
+        // TODO: handle '*' and '#' properly.
+        else
+        {
+          clearScreen(PASSCODE_ROW);
+          String message = "Max Size Is: " + maxPasswordLength;
           printMessage(message);
           printMessage("Try Again");
+          lcdPrintMessage(message, MESSAGES_ROW, true/*clear*/, true/*delay*/);
+          lcdPrintMessage("Try Again", MESSAGES_ROW, true/*clear*/, true/*delay*/);
           tempPassword = "";
+          setState(STATE_CONFIG_PASS);
         }
+
         if (key == SPECIAL_CHAR)
         {
-          printMessage("Saving Password...");
+          clearScreen(INSTRUCTIONS_ROW);
+          String message = "Saving Password...";
+          printMessage(message);
+          lcdPrintMessage(message, MESSAGES_ROW, true/*clear*/, true/*delay*/);
           // save password to EEPROM.
           writeEEPROMData(tempPassword);
           tempPassword = "";
+          message = "Password Saved.";
+          printMessage(message);
+          lcdPrintMessage(message, MESSAGES_ROW, true/*clear*/, true/*delay*/);
+          clearScreen(PASSCODE_ROW);
           setState(WAITING_FOR_INPUT);
-          printMessage("Password Saved.");
         }
         break;
       case WAITING_FOR_INPUT:
-        if (key != SPECIAL_CHAR && key != APPLY_PASSWORD)
+
+        if (!isSpecialCharacter)
         {
           tempPassword += key;
+        }
+
+        if (tempPassword.length() <= PASSWORD_ALLOWED_LENGTH)
+        {
+          if (!isSpecialCharacter)
+          {
+            printCode(tempPassword.length(), key, false);
+          }
+        }
+
+        if (tempPassword.length() > PASSWORD_ALLOWED_LENGTH)
+        {
+          wrongPassword();
+          setState(WAITING_FOR_INPUT);
+          tempPassword = "";
         }
 
         if (key == APPLY_PASSWORD)
@@ -143,14 +217,8 @@ void loop()
             tempPassword = "";
           }
         }
-        else if (tempPassword.length() > PASSWORD_ALLOWED_LENGTH)
-        {
-          wrongPassword();
-          setState(WAITING_FOR_INPUT);
-          tempPassword = "";
-        }
 #ifdef DEBUG
-        if (key == SPECIAL_CHAR)
+        if (key == DEBUG_CHAR)
         {
           printMessage("Printing Password...");
           String password(PASSWORD_EMPTY_LENGTH);
@@ -160,8 +228,8 @@ void loop()
 #endif
         break;
       default:
-           printMessage("This should not happen!!!");
-           Serial.print(state);
+        printMessage("This should not happen!!!");
+        Serial.print(state);
         break;
     }
   }
@@ -169,31 +237,43 @@ void loop()
 
 unsigned int getState()
 {
+  String message;
   String temp(PASSWORD_EMPTY_LENGTH);
   readEEPROMData(temp);
   if (temp.equals(emptyPassword))
   {
-    printMessage("Choose A Password");
+    message = "Choose Password";
+    printMessage(message);
+    lcdPrintMessage(message, MESSAGES_ROW, false, false);
     return STATE_CONFIG_PASS;
   }
   else
   {
-    printMessage("Enter Password");
+    message = "Enter Password";
+    printMessage(message);
+    lcdPrintMessage(message, MESSAGES_ROW, false, false);
     return WAITING_FOR_INPUT;
   }
 }
 
 void setState(unsigned int stat)
 {
+  String message;
   switch (stat)
   {
     case STATE_CONFIG_PASS:
       printMessage("STATE_CONFIG_PASS");
       state = STATE_CONFIG_PASS;
+      message = "Choose Password";
+      lcdPrintMessage(message, MESSAGES_ROW, false, false);
+      lcdPrintMessage("Press # to Save", INSTRUCTIONS_ROW, false, false);
       break;
     case WAITING_FOR_INPUT:
       printMessage("WAITING_FOR_INPUT");
       state = WAITING_FOR_INPUT;
+      message = "Enter Password";
+      lcdPrintMessage(message, MESSAGES_ROW, false, false);
+      lcdPrintMessage("Press # to Apply", INSTRUCTIONS_ROW, false, false);
       break;
     default:
       printMessage("This should not happen!");
@@ -203,24 +283,71 @@ void setState(unsigned int stat)
 
 void setStatus(String stat)
 {
-  // TODO: make this its own line in the lCD.
-  printMessage(stat);
+  clearScreen(STATUS_ROW);
+  lcd.setCursor(0, 0);
+  lcd.print(stat);
+}
+
+void lcdPrintMessage(String message, unsigned int row, bool clearAfterDelay, bool delayMessage)
+{
+  clearScreen(row);
+  lcd.setCursor(0, row);
+  if ((message.length() - 1) > LCD_NUMBER_OF_CHARACTERS)
+  {
+    lcd.print("long message !!!");
+  }
+  else
+  {
+    lcd.print(message);
+  }
+
+  if (delayMessage)
+  {
+    delay(DELAY_BETWEEN_MESSAGES);
+  }
+
+  if (clearAfterDelay)
+  {
+    clearScreen(row);
+  }
+}
+
+void printCode(unsigned int location, char key, bool show)
+{
+  lcd.setCursor(0, PASSCODE_ROW);
+  String pass = "Password: ";
+  lcd.print(pass);
+  lcd.setCursor((location + pass.length() - 1), 3);
+  if (show)
+    lcd.print(key);
+  else
+    lcd.print('*');
+}
+
+void clearScreen(unsigned int row)
+{
+  for (unsigned int i = 0; i < LCD_NUMBER_OF_CHARACTERS ; i++)
+  {
+    lcd.setCursor(i, row);
+    lcd.print(' ');
+  }
 }
 
 void printMessage(String message)
 {
-#ifdef LCD_ENABLED
-  Serial.println("IS THE LCD ON?!!!");
-#else
   Serial.println(message);
-#endif
-
 }
 
 void correctPassword()
 {
-  printMessage("Password Matched");
+  clearScreen(PASSCODE_ROW);
+  clearScreen(INSTRUCTIONS_ROW);
+  String message = "Password Matched";
+  printMessage(message);
+  lcdPrintMessage(message, MESSAGES_ROW, true, true);
   printMessage("Press # to unlock, * to lock, or 1 to unlock and monitor");
+  lcdPrintMessage("*:LOCK     #:UNLOCK", INSTRUCTIONS_ROW, false, false);
+  lcdPrintMessage("1:UNLOCK & MONITOR", MESSAGES_ROW, false, false);
   bool commandReceived = false;
   disablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
   digitalWrite(BUZZER_PIN, LOW);
@@ -229,6 +356,8 @@ void correctPassword()
     char key = keypad.getkey();
     if (key != NO_KEY_VALUE)
     {
+      buzz(50);
+
       if (key == UNLOCK_DOOR)
       {
         printMessage("Openning Lock");
@@ -259,13 +388,22 @@ void correctPassword()
       }
     }
   }
+
+  clearScreen(MESSAGES_ROW);
+  clearScreen(INSTRUCTIONS_ROW);
+  setState(WAITING_FOR_INPUT);
 }
 
 void wrongPassword()
 {
-  printMessage("Wrong Password !!!");
-  printMessage("Try Again");
+  clearScreen(PASSCODE_ROW);
+  String message = "Wrong Password !!!";
+  printMessage(message);
+  lcdPrintMessage(message, MESSAGES_ROW, false/*clear*/, false);
   buzz(2000);
+  message = "Try Again";
+  printMessage(message);
+  lcdPrintMessage(message, MESSAGES_ROW, true/*clear*/, true);
 }
 
 void openDoor()
@@ -306,11 +444,10 @@ void readEEPROMData(String& data)
   }
 }
 
-void monitorDoorStatus()
+void turnLCDBacklightOff()
 {
-  // TODO: use interrupts.
-  delay(50);
-
+  lcd.noBacklight();
+  lcdBacklistOff = true;
 }
 
 void enablePinInterrupt(byte pin)
