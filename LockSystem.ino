@@ -330,6 +330,7 @@ void correctPassword()
       {
         writeEEPROMData("NO DATA");
         commandReceived = true;
+        setStatus(UNKNOWN_STATE);
         state = STATE_CONFIG_PASS;
       }
       else
