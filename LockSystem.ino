@@ -86,7 +86,7 @@ void openDoor();
 void closeDoor();
 void buzz(int delayTimeInms);
 void writeEEPROMData(String data);
-void readEEPROMData(String& data);
+bool readEEPROMData(String& data);
 unsigned int getState();
 void setState(unsigned int stat);
 void setStatus(String stat);
@@ -237,10 +237,10 @@ void loop()
 
 unsigned int getState()
 {
-  String message;
   String temp(PASSWORD_EMPTY_LENGTH);
-  readEEPROMData(temp);
-  if (temp.equals(emptyPassword))
+  String message;
+  bool validData = readEEPROMData(temp);
+  if (temp.equals(emptyPassword) || !validData)
   {
     message = "Choose Password";
     printMessage(message);
@@ -444,13 +444,16 @@ void writeEEPROMData(String data)
   eeprom.writeData(data);
 }
 
-void readEEPROMData(String& data)
+bool readEEPROMData(String& data)
 {
-  if (!eeprom.readData(data))
+  const bool validData = eeprom.readData(data);
+  if (!validData)
   {
     printMessage("ERROR READING EEPROM DATA!!!");
     printMessage("READ DATA: " + data);
   }
+  
+  return validData;
 }
 
 void turnLCDBacklightOff()
