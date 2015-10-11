@@ -21,7 +21,7 @@
 
 #define EEPROM_START_ADDRESS 0x00
 
-#define DEBUG
+//#define DEBUG
 
 #define LCD_NUMBER_OF_CHARACTERS 20
 #define LCD_NUMBER_OF_LINES 4
@@ -43,6 +43,7 @@
 #define LOCK_DOOR '*'
 #define UNLOCK_DOOR SPECIAL_CHAR
 #define OPEN_AND_MONITOR_DOOR '1'
+#define RESET_PASSWORD '0'
 
 #define UNKNOWN_STATE                       "STATUS: UNKNOWN"
 #define DOOR_LOCKED_STATE                   "STATUS: LOCKED"
@@ -133,7 +134,7 @@ void loop()
 
     Serial.println(key);
     buzz(50);
-    isSpecialCharacter = (key == SPECIAL_CHAR || key == APPLY_PASSWORD);
+    isSpecialCharacter = (key == SPECIAL_CHAR || key == DEBUG_CHAR);
     // state machine
     switch (state)
     {
@@ -149,7 +150,6 @@ void loop()
             printCode(tempPassword.length(), key, true);
           }
         }
-        // TODO: handle '*' and '#' properly.
         else
         {
           clearScreen(PASSCODE_ROW);
@@ -281,6 +281,71 @@ void setState(unsigned int stat)
   }
 }
 
+void correctPassword()
+{
+  clearScreen(PASSCODE_ROW);
+  clearScreen(INSTRUCTIONS_ROW);
+  String message = "Password Matched";
+  printMessage(message);
+  lcdPrintMessage(message, MESSAGES_ROW, true, true);
+  printMessage("Press # to unlock, * to lock, or 1 to unlock and monitor");
+  lcdPrintMessage("*:LOCK     #:UNLOCK", INSTRUCTIONS_ROW, false, false);
+  lcdPrintMessage("1:UNLOCK & MONITOR", MESSAGES_ROW, false, false);
+  lcdPrintMessage("0:Reset Password", PASSCODE_ROW, false, false);
+  bool commandReceived = false;
+  disablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
+  digitalWrite(BUZZER_PIN, LOW);
+  unsigned int state = WAITING_FOR_INPUT;
+  while (!commandReceived)
+  {
+    char key = keypad.getkey();
+    if (key != NO_KEY_VALUE)
+    {
+      buzz(50);
+
+      if (key == UNLOCK_DOOR)
+      {
+        printMessage("Openning Lock");
+        openDoor();
+        commandReceived = true;
+        setStatus(DOOR_UNLOCKED_STATE);
+      }
+      else if (key == LOCK_DOOR)
+      {
+        printMessage("Closing Lock");
+        closeDoor();
+        enablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
+        commandReceived = true;
+        setStatus(DOOR_LOCKED_STATE);
+      }
+      else if (key == OPEN_AND_MONITOR_DOOR)
+      {
+        printMessage("Openning Lock and Monitoring the door");
+        openDoor();
+        enablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
+        commandReceived = true;
+        setStatus(DOOR_UNLOCKED_WITH_MONITORING_STATE);
+      }
+      else if(key == RESET_PASSWORD)
+      {
+        writeEEPROMData("NO DATA");
+        commandReceived = true;
+        state = STATE_CONFIG_PASS;
+      }
+      else
+      {
+        printMessage("Invalid Command");
+        printMessage("Press # to unlock and * to lock");
+      }
+    }
+  }
+
+  clearScreen(MESSAGES_ROW);
+  clearScreen(INSTRUCTIONS_ROW);
+  clearScreen(PASSCODE_ROW);
+  setState(state);
+}
+
 void setStatus(String stat)
 {
   clearScreen(STATUS_ROW);
@@ -336,62 +401,6 @@ void clearScreen(unsigned int row)
 void printMessage(String message)
 {
   Serial.println(message);
-}
-
-void correctPassword()
-{
-  clearScreen(PASSCODE_ROW);
-  clearScreen(INSTRUCTIONS_ROW);
-  String message = "Password Matched";
-  printMessage(message);
-  lcdPrintMessage(message, MESSAGES_ROW, true, true);
-  printMessage("Press # to unlock, * to lock, or 1 to unlock and monitor");
-  lcdPrintMessage("*:LOCK     #:UNLOCK", INSTRUCTIONS_ROW, false, false);
-  lcdPrintMessage("1:UNLOCK & MONITOR", MESSAGES_ROW, false, false);
-  bool commandReceived = false;
-  disablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
-  digitalWrite(BUZZER_PIN, LOW);
-  while (!commandReceived)
-  {
-    char key = keypad.getkey();
-    if (key != NO_KEY_VALUE)
-    {
-      buzz(50);
-
-      if (key == UNLOCK_DOOR)
-      {
-        printMessage("Openning Lock");
-        openDoor();
-        commandReceived = true;
-        setStatus(DOOR_UNLOCKED_STATE);
-      }
-      else if (key == LOCK_DOOR)
-      {
-        printMessage("Closing Lock");
-        closeDoor();
-        enablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
-        commandReceived = true;
-        setStatus(DOOR_LOCKED_STATE);
-      }
-      else if (key == OPEN_AND_MONITOR_DOOR)
-      {
-        printMessage("Openning Lock and Monitoring the door");
-        openDoor();
-        enablePinInterrupt(DOOR_SENSOR_ANALOG_PIN);
-        commandReceived = true;
-        setStatus(DOOR_UNLOCKED_WITH_MONITORING_STATE);
-      }
-      else
-      {
-        printMessage("Invalid Command");
-        printMessage("Press # to unlock and * to lock");
-      }
-    }
-  }
-
-  clearScreen(MESSAGES_ROW);
-  clearScreen(INSTRUCTIONS_ROW);
-  setState(WAITING_FOR_INPUT);
 }
 
 void wrongPassword()
